@@ -11,30 +11,42 @@ import io
 # Function to download and extract database files if they don't exist
 def download_database_if_needed():
     db_path = "data/lancedb"
-    if not os.path.exists(db_path) or not os.path.exists(f"{db_path}/docling.lance"):
+    docling_table_path = f"{db_path}/docling.lance"
+    
+    if not os.path.exists(docling_table_path) or not os.path.isdir(docling_table_path):
         st.info("Base de datos no encontrada. Descargando archivos...")
         
         # Create directories if they don't exist
         os.makedirs(db_path, exist_ok=True)
         
-        # URL to the database ZIP file in the GitHub release
-        release_url = "https://github.com/juanguampe/sblm-app/releases/download/v1.0.0/lancedb.zip"
+        # Instructions for manual database setup
+        st.markdown("""
+        ## Configuración de la Base de Datos
         
-        try:
-            # Download the ZIP file
-            response = requests.get(release_url)
-            if response.status_code == 200:
-                # Extract the ZIP file
-                z = zipfile.ZipFile(io.BytesIO(response.content))
-                z.extractall("data/")
-                st.success("Base de datos descargada y extraída correctamente.")
-            else:
-                st.error(f"No se pudo descargar la base de datos. Código de error: {response.status_code}")
-        except Exception as e:
-            st.error(f"Error al descargar o extraer la base de datos: {e}")
+        Para utilizar esta aplicación completamente, necesitas configurar la base de datos LanceDB localmente:
+        
+        ### Opción 1: Contacta al administrador
+        
+        Solicita los archivos de la base de datos al administrador del sistema y colócalos en la carpeta `data/lancedb/docling.lance`.
+        
+        ### Opción 2: Descarga la base de datos de Google Drive (próximamente)
+        
+        Pronto estará disponible la opción de descargar la base de datos automáticamente.
+        """)
+        
+        # Create a placeholder database with a warning message
+        if not os.path.exists(docling_table_path):
+            os.makedirs(docling_table_path, exist_ok=True)
+            
+            # Create a README file explaining the situation
+            with open(f"{docling_table_path}/README.txt", "w") as f:
+                f.write("Esta es una base de datos de marcador de posición. Por favor, configure la base de datos real para usar la aplicación completa.")
+                
+        return False
+    return True
 
-# Download database on startup if needed
-download_database_if_needed()
+# Check if database exists
+database_ready = download_database_if_needed()
 
 # Create OpenAI API functions without using the client
 def create_embedding(text):
@@ -55,17 +67,21 @@ def create_embedding(text):
         "model": "text-embedding-3-small"
     }
     
-    response = requests.post(
-        "https://api.openai.com/v1/embeddings",
-        headers=headers,
-        json=payload
-    )
-    
-    if response.status_code == 200:
-        return response.json()["data"][0]["embedding"]
-    else:
-        st.error(f"Error al crear embedding: {response.status_code}")
-        st.error(response.text)
+    try:
+        response = requests.post(
+            "https://api.openai.com/v1/embeddings",
+            headers=headers,
+            json=payload
+        )
+        
+        if response.status_code == 200:
+            return response.json()["data"][0]["embedding"]
+        else:
+            st.error(f"Error al crear embedding: {response.status_code}")
+            st.error(response.text)
+            return None
+    except Exception as e:
+        st.error(f"Error al crear embedding: {e}")
         return None
 
 def create_chat_completion(messages, temperature=0.7, stream=True):
@@ -107,11 +123,14 @@ def create_chat_completion(messages, temperature=0.7, stream=True):
                     if line:
                         line = line.decode('utf-8')
                         if line.startswith('data: ') and not line.startswith('data: [DONE]'):
-                            data = json.loads(line[6:])
-                            if 'choices' in data and len(data['choices']) > 0:
-                                delta = data['choices'][0].get('delta', {})
-                                if 'content' in delta:
-                                    yield delta['content']
+                            try:
+                                data = json.loads(line[6:])
+                                if 'choices' in data and len(data['choices']) > 0:
+                                    delta = data['choices'][0].get('delta', {})
+                                    if 'content' in delta:
+                                        yield delta['content']
+                            except:
+                                continue
             
             return generate()
         else:
@@ -128,6 +147,10 @@ def init_db():
     Returns:
         LanceDB table object
     """
+    if not database_ready:
+        st.warning("Base de datos no inicializada correctamente. Las funciones de búsqueda no estarán disponibles.")
+        return None
+        
     try:
         # Check if the database directory exists
         db_path = "data/lancedb"
@@ -400,9 +423,27 @@ with st.sidebar:
         help="Más fuentes proporcionan más contexto pero pueden diluir la relevancia"
     )
 
-# Stop if table is None
+# Check if database is ready
 if table is None:
-    st.error("Base de datos no encontrada o no inicializada correctamente. Por favor, contacte al administrador.")
+    st.warning("La aplicación está en modo de demostración. La base de datos completa no está disponible.")
+    
+    # Display information box with the issue
+    st.info("""
+    ### Estado de la Aplicación: Modo de Demostración
+    
+    Esta aplicación requiere una base de datos vectorial LanceDB para funcionar correctamente. 
+    
+    **Para uso local:**
+    1. Descargue la base de datos completa del administrador
+    2. Coloque los archivos en la carpeta `data/lancedb/docling.lance`
+    3. Reinicie la aplicación
+    
+    **Para más información:**
+    Consulte la documentación o contacte al administrador del sistema.
+    """)
+    
+    # Show empty chat interface
+    st.chat_input("Escribe aquí tu pregunta...", disabled=True)
     st.stop()
 
 # Display existing chat history first
