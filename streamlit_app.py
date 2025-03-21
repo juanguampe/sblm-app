@@ -36,19 +36,89 @@ def download_database_if_needed():
 # Download database on startup if needed
 download_database_if_needed()
 
-# Initialize OpenAI client with Streamlit secrets
-try:
+# Create OpenAI API functions without using the client
+def create_embedding(text):
+    """Create embedding using OpenAI API directly with requests."""
     if "OPENAI_API_KEY" in st.secrets:
-        from openai import OpenAI
-        # Create the client with minimal configuration
-        client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+        api_key = st.secrets["OPENAI_API_KEY"]
     else:
         st.error("No se encontró la clave API de OpenAI en los secretos de Streamlit.")
         st.stop()
-except Exception as e:
-    st.error(f"Error al inicializar el cliente de OpenAI: {e}")
-    st.write("Por favor, compruebe que la API key de OpenAI esté correctamente configurada en los secretos.")
-    st.stop()
+        
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}"
+    }
+    
+    payload = {
+        "input": text,
+        "model": "text-embedding-3-small"
+    }
+    
+    response = requests.post(
+        "https://api.openai.com/v1/embeddings",
+        headers=headers,
+        json=payload
+    )
+    
+    if response.status_code == 200:
+        return response.json()["data"][0]["embedding"]
+    else:
+        st.error(f"Error al crear embedding: {response.status_code}")
+        st.error(response.text)
+        return None
+
+def create_chat_completion(messages, temperature=0.7, stream=True):
+    """Create chat completion using OpenAI API directly with requests."""
+    if "OPENAI_API_KEY" in st.secrets:
+        api_key = st.secrets["OPENAI_API_KEY"]
+    else:
+        st.error("No se encontró la clave API de OpenAI en los secretos de Streamlit.")
+        st.stop()
+        
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}"
+    }
+    
+    payload = {
+        "model": "gpt-4o-mini",
+        "messages": messages,
+        "temperature": temperature,
+        "stream": stream
+    }
+    
+    try:
+        response = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers=headers,
+            json=payload,
+            stream=stream
+        )
+        
+        if response.status_code != 200:
+            st.error(f"Error al crear chat completion: {response.status_code}")
+            st.error(response.text)
+            return None
+            
+        if stream:
+            def generate():
+                for line in response.iter_lines():
+                    if line:
+                        line = line.decode('utf-8')
+                        if line.startswith('data: ') and not line.startswith('data: [DONE]'):
+                            data = json.loads(line[6:])
+                            if 'choices' in data and len(data['choices']) > 0:
+                                delta = data['choices'][0].get('delta', {})
+                                if 'content' in delta:
+                                    yield delta['content']
+            
+            return generate()
+        else:
+            return response.json()["choices"][0]["message"]["content"]
+    except Exception as e:
+        st.error(f"Error al crear chat completion: {e}")
+        return None
 
 # Initialize LanceDB connection
 @st.cache_resource
@@ -93,11 +163,9 @@ def get_context(query: str, table, num_results: int = 5) -> str:
     """
     try:
         # Generate embedding for query using OpenAI
-        response = client.embeddings.create(
-            input=query,
-            model="text-embedding-3-small"
-        )
-        query_vector = response.data[0].embedding
+        query_vector = create_embedding(query)
+        if not query_vector:
+            return "Error al generar embedding para la consulta."
         
         # Search using vector name parameter
         results = table.search(query_vector, vector_column_name="vector").limit(num_results).to_pandas()
@@ -190,37 +258,74 @@ Contexto del documento sobre el que debes responder:
     for message in messages:
         api_messages.append(message)
     
-    # First, try with primary model
+    # First, try with gpt-4o-mini
     try:
-        model_to_use = "gpt-4o-mini"
-        print(f"Intentando usar el modelo {model_to_use}")
+        print("Intentando usar el modelo gpt-4o-mini")
         
-        response_stream = client.chat.completions.create(
-            model=model_to_use,
+        stream_generator = create_chat_completion(
             messages=api_messages,
             temperature=temperature,
             stream=True
         )
         
-        response = st.write_stream(response_stream)
-        return response
+        if stream_generator:
+            full_response = ""
+            for chunk in stream_generator:
+                full_response += chunk
+                st.write(chunk, end="")
+            return full_response
+        else:
+            raise Exception("No se pudo obtener respuesta del modelo")
     except Exception as primary_error:
         st.warning(f"La llamada a la API principal falló: {primary_error}. Intentando método alternativo...")
         
-        # Fallback to standard Chat Completions API
         try:
-            model_to_use = "gpt-3.5-turbo"  # Fallback to a more widely available model
-            print(f"Usando modelo alternativo: {model_to_use}")
+            # Try with GPT-3.5
+            api_messages[0]["content"] = api_messages[0]["content"] + "\n\nUsa un lenguaje sencillo y claro."
+            print("Usando modelo alternativo: gpt-3.5-turbo")
             
-            response_stream = client.chat.completions.create(
-                model=model_to_use,
-                messages=api_messages,
-                temperature=temperature,
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {st.secrets['OPENAI_API_KEY']}"
+            }
+            
+            payload = {
+                "model": "gpt-3.5-turbo",
+                "messages": api_messages,
+                "temperature": temperature,
+                "stream": True
+            }
+            
+            response = requests.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers=headers,
+                json=payload,
                 stream=True
             )
             
-            response = st.write_stream(response_stream)
-            return response
+            if response.status_code != 200:
+                raise Exception(f"Error {response.status_code}: {response.text}")
+                
+            def generate():
+                for line in response.iter_lines():
+                    if line:
+                        line = line.decode('utf-8')
+                        if line.startswith('data: ') and not line.startswith('data: [DONE]'):
+                            try:
+                                data = json.loads(line[6:])
+                                if 'choices' in data and len(data['choices']) > 0:
+                                    delta = data['choices'][0].get('delta', {})
+                                    if 'content' in delta:
+                                        yield delta['content']
+                            except:
+                                continue
+            
+            full_response = ""
+            for chunk in generate():
+                full_response += chunk
+                st.write(chunk, end="")
+            return full_response
+            
         except Exception as fallback_error:
             st.error(f"La llamada a la API alternativa también falló: {fallback_error}")
             return "Encontré un error al intentar generar una respuesta. Por favor, intenta de nuevo más tarde."
