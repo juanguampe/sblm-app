@@ -7,6 +7,7 @@ import sys
 import requests
 import zipfile
 import io
+import pandas as pd
 
 # Debug helper to check database files
 def check_database_files():
@@ -178,14 +179,39 @@ def init_db():
         
         # Check if the 'docling' table exists
         tables = db.table_names()
-        st.write(f"Tables in database: {tables}")
+        if st.session_state.show_debug:
+            st.write(f"Tables in database: {tables}")
         
         if "docling" not in tables:
             st.error("¡No se encontró la tabla 'docling'!")
             return None
             
         # Open the table
-        return db.open_table("docling")
+        table = db.open_table("docling")
+        
+        # In debug mode, display sample data
+        if st.session_state.show_debug:
+            try:
+                st.write("### Database Sample Data")
+                sample_data = table.to_pandas().head(2)
+                st.dataframe(sample_data)
+                
+                # Check if the table has the correct schema
+                st.write("Table schema:")
+                for col in sample_data.columns:
+                    st.write(f"- {col}: {sample_data[col].dtype}")
+                
+                # Check if the 'vector' column exists and has the right dimensions
+                if 'vector' in sample_data.columns:
+                    vector_dim = len(sample_data['vector'].iloc[0])
+                    st.write(f"Vector dimension: {vector_dim}")
+                else:
+                    st.error("Vector column not found in the table!")
+                    
+            except Exception as e:
+                st.error(f"Error retrieving sample data: {e}")
+        
+        return table
     except Exception as e:
         st.error(f"Error al conectar a la base de datos: {e}")
         st.error(f"Error details: {str(e)}")
@@ -208,8 +234,26 @@ def get_context(query: str, table, num_results: int = 5) -> str:
         if not query_vector:
             return "Error al generar embedding para la consulta."
         
+        # Debug info for the query
+        if st.session_state.show_debug:
+            st.write(f"### Query Debug")
+            st.write(f"Query: '{query}'")
+            st.write(f"Vector dimension: {len(query_vector)}")
+        
         # Search using vector name parameter
+        search_start_time = time.time()
         results = table.search(query_vector, vector_column_name="vector").limit(num_results).to_pandas()
+        search_time = time.time() - search_start_time
+        
+        if st.session_state.show_debug:
+            st.write(f"Search time: {search_time:.2f} seconds")
+            st.write(f"Search results count: {len(results)}")
+            
+            if len(results) > 0:
+                st.write("### First Search Result")
+                st.write(f"Text: {results['text'].iloc[0][:200]}...")
+                st.write(f"Filename: {results['filename'].iloc[0]}")
+                st.write(f"Title: {results['title'].iloc[0]}")
         
         # Store search results in session state
         st.session_state.search_results = results
@@ -242,11 +286,20 @@ def get_context(query: str, table, num_results: int = 5) -> str:
             contexts.append(f"{row['text']}{source}")
 
         context_text = "\n\n".join(contexts)
+        
         # Store context in session state
         st.session_state.context = context_text
+        
+        # Debug context
+        if st.session_state.show_debug:
+            st.write("### Context Preview")
+            st.write(context_text[:500] + "...")
+            
         return context_text
     except Exception as e:
         st.error(f"Error de búsqueda: {e}")
+        import traceback
+        st.error(f"Stack trace: {traceback.format_exc()}")
         return f"Error al recuperar contexto: {str(e)}"
 
 def get_ai_response(messages, context: str, temperature: float = 0.7) -> str:
@@ -289,6 +342,8 @@ Tu objetivo principal es proporcionar respuestas claras, concretas y detalladas 
 
 Contexto del documento sobre el que debes responder:
 {context}
+
+Es MUY IMPORTANTE que respondas únicamente basándote en la información proporcionada en el contexto anterior. No uses información externa o conocimiento general. Si la información proporcionada en el contexto no es suficiente para responder la pregunta, indícalo claramente.
 """
 
     api_messages = [
