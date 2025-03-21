@@ -38,10 +38,17 @@ def download_database_if_needed():
 download_database_if_needed()
 
 # Initialize OpenAI client with Streamlit secrets
-if "OPENAI_API_KEY" in st.secrets:
-    client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-else:
-    st.error("No se encontró la clave API de OpenAI en los secretos de Streamlit.")
+try:
+    if "OPENAI_API_KEY" in st.secrets:
+        # Create a clean configuration without any unexpected parameters
+        client = OpenAI(
+            api_key=st.secrets["OPENAI_API_KEY"],
+        )
+    else:
+        st.error("No se encontró la clave API de OpenAI en los secretos de Streamlit.")
+        st.stop()
+except Exception as e:
+    st.error(f"Error al inicializar el cliente de OpenAI: {e}")
     st.stop()
 
 # Initialize LanceDB connection
