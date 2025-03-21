@@ -5,6 +5,37 @@ import os
 import json
 import time
 import sys
+import requests
+import zipfile
+import io
+
+# Function to download and extract database files if they don't exist
+def download_database_if_needed():
+    db_path = "data/lancedb"
+    if not os.path.exists(db_path) or not os.path.exists(f"{db_path}/docling.lance"):
+        st.info("Base de datos no encontrada. Descargando archivos...")
+        
+        # Create directories if they don't exist
+        os.makedirs(db_path, exist_ok=True)
+        
+        # URL to the database ZIP file in the GitHub release
+        release_url = "https://github.com/juanguampe/sblm-app/releases/download/v1.0.0/lancedb.zip"
+        
+        try:
+            # Download the ZIP file
+            response = requests.get(release_url)
+            if response.status_code == 200:
+                # Extract the ZIP file
+                z = zipfile.ZipFile(io.BytesIO(response.content))
+                z.extractall("data/")
+                st.success("Base de datos descargada y extraída correctamente.")
+            else:
+                st.error(f"No se pudo descargar la base de datos. Código de error: {response.status_code}")
+        except Exception as e:
+            st.error(f"Error al descargar o extraer la base de datos: {e}")
+
+# Download database on startup if needed
+download_database_if_needed()
 
 # Initialize OpenAI client with Streamlit secrets
 if "OPENAI_API_KEY" in st.secrets:
