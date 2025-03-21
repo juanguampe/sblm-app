@@ -8,35 +8,50 @@ import requests
 import zipfile
 import io
 
+# Debug helper to check database files
+def check_database_files():
+    """Print information about database files for debugging"""
+    db_path = "data/lancedb"
+    docling_path = f"{db_path}/docling.lance"
+    data_path = f"{docling_path}/data"
+    
+    # Check if paths exist
+    st.write(f"Database path exists: {os.path.exists(db_path)}")
+    st.write(f"Docling table path exists: {os.path.exists(docling_path)}")
+    st.write(f"Data path exists: {os.path.exists(data_path)}")
+    
+    # List files if directories exist
+    if os.path.exists(data_path):
+        files = os.listdir(data_path)
+        st.write(f"Files in data directory: {files}")
+    
+    # Print current working directory
+    st.write(f"Current working directory: {os.getcwd()}")
+    
+    # List all directories in current path
+    st.write(f"Directories in current path: {os.listdir('.')}")
+    if os.path.exists('data'):
+        st.write(f"Directories in data path: {os.listdir('data')}")
+
+# Add a debug toggle in sidebar
+if "show_debug" not in st.session_state:
+    st.session_state.show_debug = False
+
 # Function to download and extract database files if they don't exist
 def download_database_if_needed():
     db_path = "data/lancedb"
     docling_table_path = f"{db_path}/docling.lance"
     
     if not os.path.exists(docling_table_path) or not os.path.isdir(docling_table_path):
-        st.info("Base de datos no encontrada. Descargando archivos...")
+        st.info("Base de datos no encontrada. Verificando disponibilidad...")
         
         # Create directories if they don't exist
         os.makedirs(db_path, exist_ok=True)
         
-        # Instructions for manual database setup
-        st.markdown("""
-        ## Configuración de la Base de Datos
-        
-        Para utilizar esta aplicación completamente, necesitas configurar la base de datos LanceDB localmente:
-        
-        ### Opción 1: Contacta al administrador
-        
-        Solicita los archivos de la base de datos al administrador del sistema y colócalos en la carpeta `data/lancedb/docling.lance`.
-        
-        ### Opción 2: Descarga la base de datos de Google Drive (próximamente)
-        
-        Pronto estará disponible la opción de descargar la base de datos automáticamente.
-        """)
-        
-        # Create a placeholder database with a warning message
-        if not os.path.exists(docling_table_path):
-            os.makedirs(docling_table_path, exist_ok=True)
+        # Check for database files in the GitHub structure
+        data_path = f"{docling_table_path}/data"
+        if not os.path.exists(data_path):
+            os.makedirs(data_path, exist_ok=True)
             
             # Create a README file explaining the situation
             with open(f"{docling_table_path}/README.txt", "w") as f:
@@ -163,6 +178,8 @@ def init_db():
         
         # Check if the 'docling' table exists
         tables = db.table_names()
+        st.write(f"Tables in database: {tables}")
+        
         if "docling" not in tables:
             st.error("¡No se encontró la tabla 'docling'!")
             return None
@@ -171,6 +188,7 @@ def init_db():
         return db.open_table("docling")
     except Exception as e:
         st.error(f"Error al conectar a la base de datos: {e}")
+        st.error(f"Error details: {str(e)}")
         return None
 
 def get_context(query: str, table, num_results: int = 5) -> str:
@@ -358,7 +376,7 @@ st.set_page_config(
     page_title="Colegio San Bartolomé La Merced",
     page_icon="📚",
     layout="wide",
-    initial_sidebar_state="collapsed"  # Changed back to collapsed
+    initial_sidebar_state="collapsed"
 )
 
 # Initialize session state for app context and search results
@@ -376,9 +394,6 @@ if "temperature" not in st.session_state:
     st.session_state.temperature = 0.7
 if "results_count" not in st.session_state:
     st.session_state.results_count = 5
-
-# Initialize database
-table = init_db()
 
 # Main content area
 st.title("📚 Colegio San Bartolomé La Merced")
@@ -422,6 +437,17 @@ with st.sidebar:
         value=st.session_state.results_count,
         help="Más fuentes proporcionan más contexto pero pueden diluir la relevancia"
     )
+    
+    # Debug toggle
+    st.session_state.show_debug = st.checkbox("Mostrar información de depuración", value=st.session_state.show_debug)
+
+# Show debug information if enabled
+if st.session_state.show_debug:
+    st.write("### Información de Depuración")
+    check_database_files()
+
+# Initialize database
+table = init_db()
 
 # Check if database is ready
 if table is None:
@@ -442,9 +468,10 @@ if table is None:
     Consulte la documentación o contacte al administrador del sistema.
     """)
     
-    # Show empty chat interface
-    st.chat_input("Escribe aquí tu pregunta...", disabled=True)
-    st.stop()
+    # Continue with a disabled interface for demo purposes
+    if not st.session_state.show_debug:  # Only stop if not in debug mode
+        st.chat_input("Escribe aquí tu pregunta...", disabled=True)
+        st.stop()
 
 # Display existing chat history first
 chat_column, sources_column = st.columns([3, 1])
