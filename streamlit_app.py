@@ -1,6 +1,5 @@
 import streamlit as st
 import lancedb
-from openai import OpenAI
 import os
 import json
 import time
@@ -40,15 +39,15 @@ download_database_if_needed()
 # Initialize OpenAI client with Streamlit secrets
 try:
     if "OPENAI_API_KEY" in st.secrets:
-        # Create a clean configuration without any unexpected parameters
-        client = OpenAI(
-            api_key=st.secrets["OPENAI_API_KEY"],
-        )
+        from openai import OpenAI
+        # Create the client with minimal configuration
+        client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
     else:
         st.error("No se encontró la clave API de OpenAI en los secretos de Streamlit.")
         st.stop()
 except Exception as e:
     st.error(f"Error al inicializar el cliente de OpenAI: {e}")
+    st.write("Por favor, compruebe que la API key de OpenAI esté correctamente configurada en los secretos.")
     st.stop()
 
 # Initialize LanceDB connection
