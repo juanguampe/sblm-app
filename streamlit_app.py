@@ -186,11 +186,17 @@ if not openai_api_key:
     st.stop()
 
 # Import OpenAI here after we have the API key
+import openai
 from openai import OpenAI
+print(f"OpenAI version: {openai.__version__}")
 
-# Initialize OpenAI client
+# Initialize OpenAI client - FIXED version without proxies
 try:
-    client = OpenAI(api_key=openai_api_key)
+    client = OpenAI(
+        api_key=openai_api_key,
+        # Explicitly disable proxies
+        http_client=openai.http_client.URLLib3Client()
+    )
     print("Successfully initialized OpenAI client")
 except Exception as e:
     st.error(f"Error al inicializar cliente OpenAI: {str(e)}")
