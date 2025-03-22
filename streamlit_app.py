@@ -26,6 +26,160 @@ if not api_key:
     st.error("No se encontró la clave API de OpenAI. Por favor, verifique su archivo .env.")
     sys.exit(1)
 
+# Set up the page
+st.set_page_config(
+    page_title="Colegio San Bartolomé La Merced",
+    page_icon="📚",
+    layout="wide",
+    initial_sidebar_state="collapsed"  # Changed back to collapsed
+)
+
+# Add Font Awesome for icons
+st.markdown('<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">', unsafe_allow_html=True)
+
+# Custom CSS for better typography and UI elements
+st.markdown("""
+<style>
+    /* Improved Typography */
+    html, body, [class*="st-"] {
+        font-family: 'Merriweather', Georgia, serif;
+    }
+    h1, h2, h3, h4, h5, h6 {
+        font-family: 'Merriweather', Georgia, serif;
+        font-weight: 700;
+        letter-spacing: -0.5px;
+    }
+    h1 {
+        font-size: 2.5rem;
+        margin-bottom: 1.5rem;
+    }
+    p {
+        line-height: 1.6;
+        font-size: 1.05rem;
+    }
+    
+    /* Chat UI Improvements */
+    .stChatMessage {
+        border-radius: 10px;
+        padding: 12px !important;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    }
+    .stChatMessage[data-testid*="user"] {
+        background-color: #e5f3ff !important;
+    }
+    .stChatMessage[data-testid*="assistant"] {
+        background-color: #f8f9fa !important;
+    }
+    
+    /* Search Results Styling */
+    .search-result {
+        margin-bottom: 15px;
+        border-left: 3px solid #1a4a73;
+        padding-left: 15px;
+    }
+    .search-result summary {
+        font-weight: 600;
+        cursor: pointer;
+        margin-bottom: 8px;
+        color: #1a4a73;
+    }
+    .search-result .metadata {
+        font-style: italic;
+        color: #6c757d;
+        font-size: 0.9rem;
+        margin-bottom: 8px;
+    }
+    
+    /* Better Inputs */
+    .stTextInput input {
+        border-radius: 6px;
+        border: 1px solid #ced4da;
+        padding: 10px 15px;
+        font-size: 1rem;
+    }
+    .stTextInput input:focus {
+        border-color: #1a4a73;
+        box-shadow: 0 0 0 0.2rem rgba(26, 74, 115, 0.25);
+    }
+    
+    /* Prettier buttons */
+    button[kind="primary"] {
+        background-color: #1a4a73;
+        border-radius: 6px;
+        border: none;
+        padding: 6px 16px;
+        font-weight: 600;
+    }
+    button:not([kind="primary"]) {
+        border-radius: 6px;
+        border: 1px solid #ced4da;
+    }
+    
+    /* Login styling */
+    .login-container {
+        max-width: 400px;
+        margin: 0 auto;
+        padding: 2rem;
+        border-radius: 10px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        background-color: white;
+    }
+    .login-logo {
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+    .login-form {
+        margin-top: 1.5rem;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Password authentication function
+def authenticate(password):
+    """Verify if the password is correct."""
+    # Try to get password from secrets first (for cloud deployment)
+    correct_password = None
+    try:
+        correct_password = st.secrets["access_password"]
+    except:
+        # Fallback to environment variable (for local development)
+        correct_password = os.getenv("ACCESS_PASSWORD", "SBLMIgual2025")
+    
+    return password == correct_password
+
+# Initialize session state variables for authentication
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+# Login screen if not authenticated
+if not st.session_state.authenticated:
+    st.markdown("<div class='login-container'>", unsafe_allow_html=True)
+    st.markdown("<div class='login-logo'>", unsafe_allow_html=True)
+    st.image("https://www.sanbartolome.edu.co/wp-content/uploads/2022/05/logo_CSBM2-1.png", width=150)
+    st.markdown("</div>", unsafe_allow_html=True)
+    
+    st.markdown("<h2 style='text-align: center; margin-bottom: 1.5rem;'>Acceso al Asistente Pedagógico</h2>", unsafe_allow_html=True)
+    
+    password = st.text_input("Contraseña", type="password")
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        login_button = st.button("Ingresar", use_container_width=True)
+    
+    if login_button:
+        if authenticate(password):
+            st.session_state.authenticated = True
+            st.rerun()
+        else:
+            st.error("Contraseña incorrecta. Por favor, intente nuevamente.")
+    
+    st.markdown("<p style='text-align: center; font-size: 0.9rem; margin-top: 2rem;'>Colegio San Bartolomé La Merced<br>© 2025 Todos los derechos reservados</p>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+    
+    # Stop rendering the rest of the app
+    st.stop()
+
+# If we get here, the user is authenticated
 # Initialize OpenAI client
 client = OpenAI()
 
@@ -257,97 +411,6 @@ Contexto del documento sobre el que debes responder:
             st.error(f"La llamada a la API alternativa también falló: {fallback_error}")
             return "Encontré un error al intentar generar una respuesta. Por favor, intenta de nuevo más tarde."
 
-# Set up the page
-st.set_page_config(
-    page_title="Colegio San Bartolomé La Merced",
-    page_icon="📚",
-    layout="wide",
-    initial_sidebar_state="collapsed"  # Changed back to collapsed
-)
-
-# Add Font Awesome for icons
-st.markdown('<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">', unsafe_allow_html=True)
-
-# Custom CSS for better typography and UI elements
-st.markdown("""
-<style>
-    /* Improved Typography */
-    html, body, [class*="st-"] {
-        font-family: 'Merriweather', Georgia, serif;
-    }
-    h1, h2, h3, h4, h5, h6 {
-        font-family: 'Merriweather', Georgia, serif;
-        font-weight: 700;
-        letter-spacing: -0.5px;
-    }
-    h1 {
-        font-size: 2.5rem;
-        margin-bottom: 1.5rem;
-    }
-    p {
-        line-height: 1.6;
-        font-size: 1.05rem;
-    }
-    
-    /* Chat UI Improvements */
-    .stChatMessage {
-        border-radius: 10px;
-        padding: 12px !important;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.1);
-    }
-    .stChatMessage[data-testid*="user"] {
-        background-color: #e5f3ff !important;
-    }
-    .stChatMessage[data-testid*="assistant"] {
-        background-color: #f8f9fa !important;
-    }
-    
-    /* Search Results Styling */
-    .search-result {
-        margin-bottom: 15px;
-        border-left: 3px solid #1a4a73;
-        padding-left: 15px;
-    }
-    .search-result summary {
-        font-weight: 600;
-        cursor: pointer;
-        margin-bottom: 8px;
-        color: #1a4a73;
-    }
-    .search-result .metadata {
-        font-style: italic;
-        color: #6c757d;
-        font-size: 0.9rem;
-        margin-bottom: 8px;
-    }
-    
-    /* Better Inputs */
-    .stTextInput input {
-        border-radius: 6px;
-        border: 1px solid #ced4da;
-        padding: 10px 15px;
-        font-size: 1rem;
-    }
-    .stTextInput input:focus {
-        border-color: #1a4a73;
-        box-shadow: 0 0 0 0.2rem rgba(26, 74, 115, 0.25);
-    }
-    
-    /* Prettier buttons */
-    button[kind="primary"] {
-        background-color: #1a4a73;
-        border-radius: 6px;
-        border: none;
-        padding: 6px 16px;
-        font-weight: 600;
-    }
-    button:not([kind="primary"]) {
-        border-radius: 6px;
-        border: 1px solid #ced4da;
-    }
-</style>
-""", unsafe_allow_html=True)
-
 # Initialize session state for app context and search results
 if "first_run" not in st.session_state:
     st.session_state.first_run = True
@@ -434,6 +497,12 @@ with st.sidebar:
     # Add visual indicator for database status
     st.markdown("<hr style='margin: 1.5rem 0 1rem; border-color: #dee2e6;'>", unsafe_allow_html=True)
     st.markdown(f"<div style='background-color: #d4edda; border-radius: 4px; padding: 0.75rem; font-size: 0.9rem;'><strong>Estado:</strong> Base de datos cargada<br><span style='color: #5a6268;'>{len(database)} documentos indexados</span></div>", unsafe_allow_html=True)
+    
+    # Logout option
+    st.markdown("<hr style='margin: 1.5rem 0 1rem; border-color: #dee2e6;'>", unsafe_allow_html=True)
+    if st.button("Cerrar sesión", use_container_width=True):
+        st.session_state.authenticated = False
+        st.rerun()
 
 # Stop if database is None
 if database is None:
