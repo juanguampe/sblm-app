@@ -20,12 +20,6 @@ load_dotenv()
 import openai
 print(f"OpenAI Python SDK version: {openai.__version__}")
 
-# Check if API key is set
-api_key = os.getenv("OPENAI_API_KEY")
-if not api_key:
-    st.error("No se encontró la clave API de OpenAI. Por favor, verifique su archivo .env.")
-    sys.exit(1)
-
 # Set up the page
 st.set_page_config(
     page_title="Colegio San Bartolomé La Merced",
@@ -180,8 +174,18 @@ if not st.session_state.authenticated:
     st.stop()
 
 # If we get here, the user is authenticated
+# Check if API key is set - prioritize Streamlit secrets
+try:
+    openai_api_key = st.secrets["OPENAI_API_KEY"]
+except Exception:
+    openai_api_key = os.getenv("OPENAI_API_KEY")
+    
+if not openai_api_key:
+    st.error("No se encontró la clave API de OpenAI. Por favor, añada la clave en los secretos de Streamlit.")
+    st.stop()
+
 # Initialize OpenAI client
-client = OpenAI()
+client = OpenAI(api_key=openai_api_key)
 
 # Helper function for vector similarity
 def cosine_similarity(a, b):
