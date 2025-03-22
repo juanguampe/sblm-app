@@ -1,7 +1,5 @@
 import streamlit as st
 import numpy as np
-from openai import OpenAI
-from dotenv import load_dotenv
 import os
 import json
 import time
@@ -12,13 +10,6 @@ import pickle
 import sys
 sys.stdout.reconfigure(encoding='utf-8')
 sys.stdin.reconfigure(encoding='utf-8')
-
-# Load environment variables
-load_dotenv()
-
-# Print OpenAI version (for debugging)
-import openai
-print(f"OpenAI Python SDK version: {openai.__version__}")
 
 # Set up the page
 st.set_page_config(
@@ -183,16 +174,27 @@ if not st.session_state.authenticated:
 # If we get here, the user is authenticated
 # Get OpenAI API key from secrets or environment variables
 try:
-    openai_api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
-except:
+    openai_api_key = st.secrets["OPENAI_API_KEY"]
+    print("Retrieved API key from secrets")
+except Exception as e:
+    print(f"Error getting key from secrets: {e}")
     openai_api_key = os.getenv("OPENAI_API_KEY")
+    print("Falling back to environment variable")
 
 if not openai_api_key:
     st.error("No se encontró la clave API de OpenAI. Por favor, configure la clave en los secretos de Streamlit.")
     st.stop()
 
-# Initialize OpenAI client with explicitly passed API key
-client = OpenAI(api_key=openai_api_key)
+# Import OpenAI here after we have the API key
+from openai import OpenAI
+
+# Initialize OpenAI client
+try:
+    client = OpenAI(api_key=openai_api_key)
+    print("Successfully initialized OpenAI client")
+except Exception as e:
+    st.error(f"Error al inicializar cliente OpenAI: {str(e)}")
+    st.stop()
 
 # Helper function for vector similarity
 def cosine_similarity(a, b):
