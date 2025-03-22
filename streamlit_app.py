@@ -1,228 +1,87 @@
 import streamlit as st
-import lancedb
+import numpy as np
+from openai import OpenAI
+from dotenv import load_dotenv
 import os
 import json
 import time
 import sys
-import requests
-import zipfile
-import io
-import pandas as pd
+import pickle
 
-# Debug helper to check database files
-def check_database_files():
-    """Print information about database files for debugging"""
-    db_path = "data/lancedb"
-    docling_path = f"{db_path}/docling.lance"
-    data_path = f"{docling_path}/data"
-    
-    # Check if paths exist
-    st.write(f"Database path exists: {os.path.exists(db_path)}")
-    st.write(f"Docling table path exists: {os.path.exists(docling_path)}")
-    st.write(f"Data path exists: {os.path.exists(data_path)}")
-    
-    # List files if directories exist
-    if os.path.exists(data_path):
-        files = os.listdir(data_path)
-        st.write(f"Files in data directory: {files}")
-    
-    # Print current working directory
-    st.write(f"Current working directory: {os.getcwd()}")
-    
-    # List all directories in current path
-    st.write(f"Directories in current path: {os.listdir('.')}")
-    if os.path.exists('data'):
-        st.write(f"Directories in data path: {os.listdir('data')}")
+# Ensure proper encoding for Spanish characters
+import sys
+sys.stdout.reconfigure(encoding='utf-8')
+sys.stdin.reconfigure(encoding='utf-8')
 
-# Add a debug toggle in sidebar
-if "show_debug" not in st.session_state:
-    st.session_state.show_debug = False
+# Load environment variables
+load_dotenv()
 
-# Function to download and extract database files if they don't exist
-def download_database_if_needed():
-    db_path = "data/lancedb"
-    docling_table_path = f"{db_path}/docling.lance"
-    
-    if not os.path.exists(docling_table_path) or not os.path.isdir(docling_table_path):
-        st.info("Base de datos no encontrada. Verificando disponibilidad...")
-        
-        # Create directories if they don't exist
-        os.makedirs(db_path, exist_ok=True)
-        
-        # Check for database files in the GitHub structure
-        data_path = f"{docling_table_path}/data"
-        if not os.path.exists(data_path):
-            os.makedirs(data_path, exist_ok=True)
-            
-            # Create a README file explaining the situation
-            with open(f"{docling_table_path}/README.txt", "w") as f:
-                f.write("Esta es una base de datos de marcador de posición. Por favor, configure la base de datos real para usar la aplicación completa.")
-                
-        return False
-    return True
+# Print OpenAI version (for debugging)
+import openai
+print(f"OpenAI Python SDK version: {openai.__version__}")
 
-# Check if database exists
-database_ready = download_database_if_needed()
+# Check if API key is set
+api_key = os.getenv("OPENAI_API_KEY")
+if not api_key:
+    st.error("No se encontró la clave API de OpenAI. Por favor, verifique su archivo .env.")
+    sys.exit(1)
 
-# Create OpenAI API functions without using the client
-def create_embedding(text):
-    """Create embedding using OpenAI API directly with requests."""
-    if "OPENAI_API_KEY" in st.secrets:
-        api_key = st.secrets["OPENAI_API_KEY"]
-    else:
-        st.error("No se encontró la clave API de OpenAI en los secretos de Streamlit.")
-        st.stop()
-        
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {api_key}"
-    }
-    
-    payload = {
-        "input": text,
-        "model": "text-embedding-3-small"
-    }
-    
-    try:
-        response = requests.post(
-            "https://api.openai.com/v1/embeddings",
-            headers=headers,
-            json=payload
-        )
-        
-        if response.status_code == 200:
-            return response.json()["data"][0]["embedding"]
-        else:
-            st.error(f"Error al crear embedding: {response.status_code}")
-            st.error(response.text)
-            return None
-    except Exception as e:
-        st.error(f"Error al crear embedding: {e}")
-        return None
+# Initialize OpenAI client
+client = OpenAI()
 
-def create_chat_completion(messages, temperature=0.7, stream=True):
-    """Create chat completion using OpenAI API directly with requests."""
-    if "OPENAI_API_KEY" in st.secrets:
-        api_key = st.secrets["OPENAI_API_KEY"]
-    else:
-        st.error("No se encontró la clave API de OpenAI en los secretos de Streamlit.")
-        st.stop()
-        
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {api_key}"
-    }
-    
-    payload = {
-        "model": "gpt-4o-mini",
-        "messages": messages,
-        "temperature": temperature,
-        "stream": stream
-    }
-    
-    try:
-        response = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers=headers,
-            json=payload,
-            stream=stream
-        )
-        
-        if response.status_code != 200:
-            st.error(f"Error al crear chat completion: {response.status_code}")
-            st.error(response.text)
-            return None
-            
-        if stream:
-            def generate():
-                for line in response.iter_lines():
-                    if line:
-                        line = line.decode('utf-8')
-                        if line.startswith('data: ') and not line.startswith('data: [DONE]'):
-                            try:
-                                data = json.loads(line[6:])
-                                if 'choices' in data and len(data['choices']) > 0:
-                                    delta = data['choices'][0].get('delta', {})
-                                    if 'content' in delta:
-                                        yield delta['content']
-                            except:
-                                continue
-            
-            return generate()
-        else:
-            return response.json()["choices"][0]["message"]["content"]
-    except Exception as e:
-        st.error(f"Error al crear chat completion: {e}")
-        return None
+# Helper function for vector similarity
+def cosine_similarity(a, b):
+    """Calculate cosine similarity between two vectors."""
+    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
 
-# Initialize LanceDB connection
+# Load embedded database
 @st.cache_resource
-def init_db():
-    """Initialize database connection.
+def load_embedded_database():
+    """Load the embedded database from file.
 
     Returns:
-        LanceDB table object
+        List of records with text, vector, and metadata
     """
-    if not database_ready:
-        st.warning("Base de datos no inicializada correctamente. Las funciones de búsqueda no estarán disponibles.")
-        return None
-        
     try:
-        # Check if the database directory exists
-        db_path = "data/lancedb"
-        if not os.path.exists(db_path):
-            st.error(f"¡El directorio de la base de datos {db_path} no existe!")
-            return None
+        # First try to load from JSON (more portable)
+        try:
+            with open("data/embedded_database.json", "r", encoding="utf-8") as f:
+                print("Loading database from JSON...")
+                records = json.load(f)
+                print(f"Loaded {len(records)} records from JSON")
+                return records
+        except Exception as json_error:
+            print(f"Error loading from JSON: {json_error}")
             
-        # Connect to the database
-        db = lancedb.connect(db_path)
-        
-        # Check if the 'docling' table exists
-        tables = db.table_names()
-        if st.session_state.show_debug:
-            st.write(f"Tables in database: {tables}")
-        
-        if "docling" not in tables:
-            st.error("¡No se encontró la tabla 'docling'!")
-            return None
-            
-        # Open the table
-        table = db.open_table("docling")
-        
-        # In debug mode, display sample data
-        if st.session_state.show_debug:
+            # Fall back to pickle if JSON fails
             try:
-                st.write("### Database Sample Data")
-                sample_data = table.to_pandas().head(2)
-                st.dataframe(sample_data)
+                with open("data/embedded_database.pkl", "rb") as f:
+                    print("Loading database from pickle...")
+                    records = pickle.load(f)
+                    print(f"Loaded {len(records)} records from pickle")
+                    return records
+            except Exception as pickle_error:
+                print(f"Error loading from pickle: {pickle_error}")
                 
-                # Check if the table has the correct schema
-                st.write("Table schema:")
-                for col in sample_data.columns:
-                    st.write(f"- {col}: {sample_data[col].dtype}")
-                
-                # Check if the 'vector' column exists and has the right dimensions
-                if 'vector' in sample_data.columns:
-                    vector_dim = len(sample_data['vector'].iloc[0])
-                    st.write(f"Vector dimension: {vector_dim}")
-                else:
-                    st.error("Vector column not found in the table!")
-                    
-            except Exception as e:
-                st.error(f"Error retrieving sample data: {e}")
-        
-        return table
+                # Try from embedded data if both external files fail
+                try:
+                    print("Loading from embedded data...")
+                    from embedded_data import EMBEDDED_DATABASE
+                    print(f"Loaded {len(EMBEDDED_DATABASE)} records from embedded data")
+                    return EMBEDDED_DATABASE
+                except Exception as embedded_error:
+                    print(f"Error loading from embedded data: {embedded_error}")
+                    raise Exception("Failed to load database from any source")
     except Exception as e:
-        st.error(f"Error al conectar a la base de datos: {e}")
-        st.error(f"Error details: {str(e)}")
+        st.error(f"Error al cargar la base de datos: {e}")
         return None
 
-def get_context(query: str, table, num_results: int = 5) -> str:
+def get_context(query: str, database, num_results: int = 5) -> str:
     """Search the database for relevant context.
 
     Args:
         query: User's question
-        table: LanceDB table object
+        database: List of database records
         num_results: Number of results to return
 
     Returns:
@@ -230,47 +89,46 @@ def get_context(query: str, table, num_results: int = 5) -> str:
     """
     try:
         # Generate embedding for query using OpenAI
-        query_vector = create_embedding(query)
-        if not query_vector:
-            return "Error al generar embedding para la consulta."
+        response = client.embeddings.create(
+            input=query,
+            model="text-embedding-3-small"
+        )
+        query_vector = response.data[0].embedding
         
-        # Debug info for the query
-        if st.session_state.show_debug:
-            st.write(f"### Query Debug")
-            st.write(f"Query: '{query}'")
-            st.write(f"Vector dimension: {len(query_vector)}")
+        # Calculate similarity scores
+        results = []
+        for record in database:
+            similarity = cosine_similarity(query_vector, record['vector'])
+            results.append({
+                'text': record['text'],
+                'filename': record['filename'],
+                'title': record['title'],
+                'page_numbers_str': record['page_numbers_str'],
+                'similarity': similarity
+            })
         
-        # Search using vector name parameter
-        search_start_time = time.time()
-        results = table.search(query_vector, vector_column_name="vector").limit(num_results).to_pandas()
-        search_time = time.time() - search_start_time
+        # Sort by similarity (highest first)
+        results.sort(key=lambda x: x['similarity'], reverse=True)
         
-        if st.session_state.show_debug:
-            st.write(f"Search time: {search_time:.2f} seconds")
-            st.write(f"Search results count: {len(results)}")
-            
-            if len(results) > 0:
-                st.write("### First Search Result")
-                st.write(f"Text: {results['text'].iloc[0][:200]}...")
-                st.write(f"Filename: {results['filename'].iloc[0]}")
-                st.write(f"Title: {results['title'].iloc[0]}")
+        # Take top results
+        top_results = results[:num_results]
         
         # Store search results in session state
-        st.session_state.search_results = results
+        st.session_state.search_results = top_results
         
         # Just log the count - no expander here
-        st.info(f"Se encontraron {len(results)} fuentes relevantes")
+        st.info(f"Se encontraron {len(top_results)} fuentes relevantes")
         
         contexts = []
 
-        for i, (_, row) in enumerate(results.iterrows()):
+        for result in top_results:
             # Get metadata fields
-            filename = row["filename"]
-            title = row["title"]
+            filename = result["filename"]
+            title = result["title"]
             
             # Parse page numbers from string back to list
             try:
-                page_numbers = json.loads(row["page_numbers_str"])
+                page_numbers = json.loads(result["page_numbers_str"])
             except:
                 page_numbers = []
             
@@ -283,24 +141,36 @@ def get_context(query: str, table, num_results: int = 5) -> str:
             if title:
                 source += f"\nTítulo: {title}"
 
-            contexts.append(f"{row['text']}{source}")
+            contexts.append(f"{result['text']}{source}")
 
         context_text = "\n\n".join(contexts)
-        
         # Store context in session state
         st.session_state.context = context_text
-        
-        # Debug context
-        if st.session_state.show_debug:
-            st.write("### Context Preview")
-            st.write(context_text[:500] + "...")
-            
         return context_text
     except Exception as e:
         st.error(f"Error de búsqueda: {e}")
-        import traceback
-        st.error(f"Stack trace: {traceback.format_exc()}")
         return f"Error al recuperar contexto: {str(e)}"
+
+def get_chat_download_str():
+    """Format chat history for download.
+    
+    Returns:
+        str: Formatted chat history
+    """
+    if not st.session_state.messages:
+        return "No hay mensajes para descargar."
+        
+    download_str = "Conversación con el Asistente del Colegio San Bartolomé La Merced\n"
+    download_str += "=============================================================\n\n"
+    
+    for message in st.session_state.messages:
+        role = "Usuario" if message["role"] == "user" else "Asistente"
+        download_str += f"[{role}]\n{message['content']}\n\n"
+    
+    download_str += "=============================================================\n"
+    download_str += f"Descargado el: {time.strftime('%d/%m/%Y %H:%M:%S')}\n"
+    
+    return download_str
 
 def get_ai_response(messages, context: str, temperature: float = 0.7) -> str:
     """Get streaming response from OpenAI API with fallback options.
@@ -342,8 +212,6 @@ Tu objetivo principal es proporcionar respuestas claras, concretas y detalladas 
 
 Contexto del documento sobre el que debes responder:
 {context}
-
-Es MUY IMPORTANTE que respondas únicamente basándote en la información proporcionada en el contexto anterior. No uses información externa o conocimiento general. Si la información proporcionada en el contexto no es suficiente para responder la pregunta, indícalo claramente.
 """
 
     api_messages = [
@@ -354,74 +222,37 @@ Es MUY IMPORTANTE que respondas únicamente basándote en la información propor
     for message in messages:
         api_messages.append(message)
     
-    # First, try with gpt-4o-mini
+    # First, try with primary model
     try:
-        print("Intentando usar el modelo gpt-4o-mini")
+        model_to_use = "gpt-4o-mini"
+        print(f"Intentando usar el modelo {model_to_use}")
         
-        stream_generator = create_chat_completion(
+        response_stream = client.chat.completions.create(
+            model=model_to_use,
             messages=api_messages,
             temperature=temperature,
             stream=True
         )
         
-        if stream_generator:
-            full_response = ""
-            for chunk in stream_generator:
-                full_response += chunk
-                st.write(chunk, end="")
-            return full_response
-        else:
-            raise Exception("No se pudo obtener respuesta del modelo")
+        response = st.write_stream(response_stream)
+        return response
     except Exception as primary_error:
         st.warning(f"La llamada a la API principal falló: {primary_error}. Intentando método alternativo...")
         
+        # Fallback to standard Chat Completions API
         try:
-            # Try with GPT-3.5
-            api_messages[0]["content"] = api_messages[0]["content"] + "\n\nUsa un lenguaje sencillo y claro."
-            print("Usando modelo alternativo: gpt-3.5-turbo")
+            model_to_use = "gpt-3.5-turbo"  # Fallback to a more widely available model
+            print(f"Usando modelo alternativo: {model_to_use}")
             
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {st.secrets['OPENAI_API_KEY']}"
-            }
-            
-            payload = {
-                "model": "gpt-3.5-turbo",
-                "messages": api_messages,
-                "temperature": temperature,
-                "stream": True
-            }
-            
-            response = requests.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers=headers,
-                json=payload,
+            response_stream = client.chat.completions.create(
+                model=model_to_use,
+                messages=api_messages,
+                temperature=temperature,
                 stream=True
             )
             
-            if response.status_code != 200:
-                raise Exception(f"Error {response.status_code}: {response.text}")
-                
-            def generate():
-                for line in response.iter_lines():
-                    if line:
-                        line = line.decode('utf-8')
-                        if line.startswith('data: ') and not line.startswith('data: [DONE]'):
-                            try:
-                                data = json.loads(line[6:])
-                                if 'choices' in data and len(data['choices']) > 0:
-                                    delta = data['choices'][0].get('delta', {})
-                                    if 'content' in delta:
-                                        yield delta['content']
-                            except:
-                                continue
-            
-            full_response = ""
-            for chunk in generate():
-                full_response += chunk
-                st.write(chunk, end="")
-            return full_response
-            
+            response = st.write_stream(response_stream)
+            return response
         except Exception as fallback_error:
             st.error(f"La llamada a la API alternativa también falló: {fallback_error}")
             return "Encontré un error al intentar generar una respuesta. Por favor, intenta de nuevo más tarde."
@@ -431,8 +262,91 @@ st.set_page_config(
     page_title="Colegio San Bartolomé La Merced",
     page_icon="📚",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="collapsed"  # Changed back to collapsed
 )
+
+# Add Font Awesome for icons
+st.markdown('<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">', unsafe_allow_html=True)
+
+# Custom CSS for better typography and UI elements
+st.markdown("""
+<style>
+    /* Improved Typography */
+    html, body, [class*="st-"] {
+        font-family: 'Merriweather', Georgia, serif;
+    }
+    h1, h2, h3, h4, h5, h6 {
+        font-family: 'Merriweather', Georgia, serif;
+        font-weight: 700;
+        letter-spacing: -0.5px;
+    }
+    h1 {
+        font-size: 2.5rem;
+        margin-bottom: 1.5rem;
+    }
+    p {
+        line-height: 1.6;
+        font-size: 1.05rem;
+    }
+    
+    /* Chat UI Improvements */
+    .stChatMessage {
+        border-radius: 10px;
+        padding: 12px !important;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    }
+    .stChatMessage[data-testid*="user"] {
+        background-color: #e5f3ff !important;
+    }
+    .stChatMessage[data-testid*="assistant"] {
+        background-color: #f8f9fa !important;
+    }
+    
+    /* Search Results Styling */
+    .search-result {
+        margin-bottom: 15px;
+        border-left: 3px solid #1a4a73;
+        padding-left: 15px;
+    }
+    .search-result summary {
+        font-weight: 600;
+        cursor: pointer;
+        margin-bottom: 8px;
+        color: #1a4a73;
+    }
+    .search-result .metadata {
+        font-style: italic;
+        color: #6c757d;
+        font-size: 0.9rem;
+        margin-bottom: 8px;
+    }
+    
+    /* Better Inputs */
+    .stTextInput input {
+        border-radius: 6px;
+        border: 1px solid #ced4da;
+        padding: 10px 15px;
+        font-size: 1rem;
+    }
+    .stTextInput input:focus {
+        border-color: #1a4a73;
+        box-shadow: 0 0 0 0.2rem rgba(26, 74, 115, 0.25);
+    }
+    
+    /* Prettier buttons */
+    button[kind="primary"] {
+        background-color: #1a4a73;
+        border-radius: 6px;
+        border: none;
+        padding: 6px 16px;
+        font-weight: 600;
+    }
+    button:not([kind="primary"]) {
+        border-radius: 6px;
+        border: 1px solid #ced4da;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # Initialize session state for app context and search results
 if "first_run" not in st.session_state:
@@ -450,83 +364,81 @@ if "temperature" not in st.session_state:
 if "results_count" not in st.session_state:
     st.session_state.results_count = 5
 
-# Main content area
-st.title("📚 Colegio San Bartolomé La Merced")
-st.write("Realice consultas sobre los documentos en nuestra base de conocimiento. Proporcionaré respuestas con fuentes relevantes.")
+# Load database
+database = load_embedded_database()
 
-# Simple sidebar with minimal controls
+# Main content area
+st.markdown("<h1 style='text-align: center; color: #1a4a73; margin-bottom: 0;'>📚 Colegio San Bartolomé La Merced</h1>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; color: #6c757d; font-size: 1.2rem; margin-bottom: 2rem;'>Realice consultas sobre los documentos en nuestra base de conocimiento.<br>Proporcionaré respuestas con fuentes relevantes.</p>", unsafe_allow_html=True)
+
+# Styled sidebar with improved controls
 with st.sidebar:
-    st.title("Configuración")
+    st.markdown("<h1 style='color: #1a4a73; font-size: 1.5rem;'>Configuración</h1>", unsafe_allow_html=True)
     
-    # Clear buttons
-    st.header("Acciones")
+    # Clear buttons with styling
+    st.markdown("<h2 style='color: #1a4a73; font-size: 1.2rem; margin-top: 1.5rem;'>Acciones</h2>", unsafe_allow_html=True)
     col1, col2 = st.columns(2)
     
     with col1:
-        if st.button("Limpiar Chat"):
+        if st.button("Limpiar Chat", use_container_width=True):
             st.session_state.messages = []
             st.rerun()
     
     with col2:
-        if st.button("Limpiar Fuentes"):
+        if st.button("Limpiar Fuentes", use_container_width=True):
             st.session_state.context = ""
             st.session_state.search_results = []
             st.session_state.context_expanded = False
             st.rerun()
     
-    # Advanced settings directly in sidebar
-    st.header("Configuración Avanzada")
+    # Advanced settings with improved styling
+    st.markdown("<h2 style='color: #1a4a73; font-size: 1.2rem; margin-top: 2rem;'>Configuración Avanzada</h2>", unsafe_allow_html=True)
+    
+    # Add a divider
+    st.markdown("<hr style='margin: 1rem 0; border-color: #dee2e6;'>", unsafe_allow_html=True)
+    
+    # Temperature with improved labels
+    st.markdown("<p style='margin-bottom: 0.2rem; font-weight: 600; color: #495057;'>Creatividad de respuestas</p>", unsafe_allow_html=True)
     st.session_state.temperature = st.slider(
         "Temperatura", 
         min_value=0.0, 
         max_value=1.0, 
         value=st.session_state.temperature,
         step=0.1,
-        help="Valores más altos producen respuestas más creativas, valores más bajos producen respuestas más deterministas"
+        help="Valores más altos producen respuestas más creativas, valores más bajos producen respuestas más deterministas",
+        label_visibility="collapsed"
     )
     
+    # Source count with descriptive labels
+    st.markdown("<p style='margin: 1rem 0 0.2rem; font-weight: 600; color: #495057;'>Fuentes a recuperar</p>", unsafe_allow_html=True)
     st.session_state.results_count = st.slider(
-        "Fuentes a recuperar", 
+        "Fuentes", 
         min_value=1, 
         max_value=15, 
         value=st.session_state.results_count,
-        help="Más fuentes proporcionan más contexto pero pueden diluir la relevancia"
+        help="Más fuentes proporcionan más contexto pero pueden diluir la relevancia",
+        label_visibility="collapsed"
     )
     
-    # Debug toggle
-    st.session_state.show_debug = st.checkbox("Mostrar información de depuración", value=st.session_state.show_debug)
+    # Download chat option
+    st.markdown("<p style='margin: 1rem 0 0.2rem; font-weight: 600; color: #495057;'>Descargar conversación</p>", unsafe_allow_html=True)
+    if st.download_button(
+        label="Descargar Chat",
+        data=get_chat_download_str(),
+        file_name="conversacion.txt",
+        mime="text/plain",
+        use_container_width=True
+    ):
+        st.success("Conversación descargada con éxito")
+    
+    # Add visual indicator for database status
+    st.markdown("<hr style='margin: 1.5rem 0 1rem; border-color: #dee2e6;'>", unsafe_allow_html=True)
+    st.markdown(f"<div style='background-color: #d4edda; border-radius: 4px; padding: 0.75rem; font-size: 0.9rem;'><strong>Estado:</strong> Base de datos cargada<br><span style='color: #5a6268;'>{len(database)} documentos indexados</span></div>", unsafe_allow_html=True)
 
-# Show debug information if enabled
-if st.session_state.show_debug:
-    st.write("### Información de Depuración")
-    check_database_files()
-
-# Initialize database
-table = init_db()
-
-# Check if database is ready
-if table is None:
-    st.warning("La aplicación está en modo de demostración. La base de datos completa no está disponible.")
-    
-    # Display information box with the issue
-    st.info("""
-    ### Estado de la Aplicación: Modo de Demostración
-    
-    Esta aplicación requiere una base de datos vectorial LanceDB para funcionar correctamente. 
-    
-    **Para uso local:**
-    1. Descargue la base de datos completa del administrador
-    2. Coloque los archivos en la carpeta `data/lancedb/docling.lance`
-    3. Reinicie la aplicación
-    
-    **Para más información:**
-    Consulte la documentación o contacte al administrador del sistema.
-    """)
-    
-    # Continue with a disabled interface for demo purposes
-    if not st.session_state.show_debug:  # Only stop if not in debug mode
-        st.chat_input("Escribe aquí tu pregunta...", disabled=True)
-        st.stop()
+# Stop if database is None
+if database is None:
+    st.error("Base de datos no encontrada o no inicializada correctamente. Por favor, contacte al administrador.")
+    st.stop()
 
 # Display existing chat history first
 chat_column, sources_column = st.columns([3, 1])
@@ -537,10 +449,10 @@ with chat_column:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-# Sources are shown in the right column
+# Sources are shown in the right column with enhanced styling
 with sources_column:
     if st.session_state.context and st.session_state.context_expanded:
-        st.subheader("Fuentes")
+        st.markdown("<h3 style='color: #1a4a73; border-bottom: 2px solid #dee2e6; padding-bottom: 8px; margin-bottom: 16px;'>Fuentes</h3>", unsafe_allow_html=True)
         
         for chunk in st.session_state.context.split("\n\n"):
             # Split into text and metadata parts
@@ -559,9 +471,9 @@ with sources_column:
                 f"""
                 <div class="search-result">
                     <details>
-                        <summary>{source}</summary>
-                        <div class="metadata">Sección: {title}</div>
-                        <div style="margin-top: 8px;">{text}</div>
+                        <summary><i class="fas fa-file-alt"></i> {source}</summary>
+                        <div class="metadata"><strong>Sección:</strong> {title}</div>
+                        <div style="margin-top: 12px; background-color: #f8f9fa; padding: 12px; border-radius: 6px; font-size: 0.95rem;">{text}</div>
                     </details>
                 </div>
                 """,
@@ -572,7 +484,7 @@ with sources_column:
 if prompt := st.chat_input("Escribe aquí tu pregunta..."):
     # Get relevant context first
     with st.status("Buscando información relevante...", expanded=False) as status:
-        context = get_context(prompt, table, num_results=st.session_state.results_count)
+        context = get_context(prompt, database, num_results=st.session_state.results_count)
         st.session_state.context_expanded = True
         
     # Add user message to chat history and display
