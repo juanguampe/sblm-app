@@ -120,7 +120,12 @@ st.markdown("""
     }
     .login-logo {
         text-align: center;
-        margin-bottom: 2rem;
+        margin-bottom: 1.5rem;
+    }
+    .login-icon {
+        font-size: 4rem;
+        color: #1a4a73;
+        margin-bottom: 1rem;
     }
     .login-form {
         margin-top: 1.5rem;
@@ -148,8 +153,10 @@ if "authenticated" not in st.session_state:
 # Login screen if not authenticated
 if not st.session_state.authenticated:
     st.markdown("<div class='login-container'>", unsafe_allow_html=True)
+    
+    # Use Font Awesome for a book icon instead of an image
     st.markdown("<div class='login-logo'>", unsafe_allow_html=True)
-    st.image("https://www.sanbartolome.edu.co/wp-content/uploads/2022/05/logo_CSBM2-1.png", width=150)
+    st.markdown("<div class='login-icon'><i class='fas fa-book-open'></i></div>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
     
     st.markdown("<h2 style='text-align: center; margin-bottom: 1.5rem;'>Acceso al Asistente Pedagógico</h2>", unsafe_allow_html=True)
@@ -174,17 +181,17 @@ if not st.session_state.authenticated:
     st.stop()
 
 # If we get here, the user is authenticated
-# Check if API key is set - prioritize Streamlit secrets
+# Get OpenAI API key from secrets or environment variables
 try:
-    openai_api_key = st.secrets["OPENAI_API_KEY"]
-except Exception:
+    openai_api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
+except:
     openai_api_key = os.getenv("OPENAI_API_KEY")
-    
+
 if not openai_api_key:
-    st.error("No se encontró la clave API de OpenAI. Por favor, añada la clave en los secretos de Streamlit.")
+    st.error("No se encontró la clave API de OpenAI. Por favor, configure la clave en los secretos de Streamlit.")
     st.stop()
 
-# Initialize OpenAI client
+# Initialize OpenAI client with explicitly passed API key
 client = OpenAI(api_key=openai_api_key)
 
 # Helper function for vector similarity
