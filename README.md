@@ -1,22 +1,47 @@
-# Colegio San Bartolomé La Merced - Asistente RAG
+# Asistente Pedagogía Ignaciana - Colegio San Bartolomé La Merced
 
-Una aplicación de preguntas y respuestas basada en documentos del Colegio San Bartolomé La Merced, utilizando tecnología de Retrieval-Augmented Generation (RAG).
+Aplicación de chat con vectores integrados para responder consultas sobre pedagogía Ignaciana y la propuesta educativa del Colegio San Bartolomé La Merced.
 
-## Características
+## Funcionalidades
 
-- Busca en documentos para proporcionar respuestas precisas
-- Cita fuentes relevantes de documentos
-- Interfaz amigable con Streamlit
+- Chat interactivo con respuestas basadas en documentos institucionales
+- Búsqueda semántica en vectores integrados 
+- Interfaz elegante y fácil de usar
+- Citación automática de fuentes
+- Soporte completo para caracteres especiales del español
+- Protección por contraseña para control de acceso
 
-## Tecnologías
+## Protección de Acceso
 
-- Streamlit para la interfaz web
-- LanceDB como base de datos vectorial
-- OpenAI para generación de embeddings y respuestas
+La aplicación está protegida por contraseña para controlar el acceso y el uso del API. La contraseña por defecto es `SBLMIgual2025`, pero se recomienda cambiarla en producción usando los secretos de Streamlit.
 
-## Cómo usar
+## Despliegue en Streamlit Cloud
 
-1. Escribe tu pregunta en el campo de texto
-2. La aplicación buscará información relevante en la base de conocimiento
-3. Se mostrará una respuesta basada en los documentos encontrados
-4. Las fuentes relevantes se muestran en la barra lateral
+1. Asegúrese de que los siguientes archivos estén presentes en el repositorio:
+   - `streamlit_app.py` - La aplicación principal
+   - `data/embedded_database.json` - Base de datos vectorial serializada
+   - `data/embedded_database.pkl` - Respaldo de la base de datos
+   - `embedded_data.py` - Datos integrados en código Python (opcional)
+   - `requirements.txt` - Dependencias
+   - `.streamlit/config.toml` - Configuración de Streamlit
+
+2. Configurar en Streamlit Cloud:
+   - **Repository**: juanguampe/sblm-app
+   - **Branch**: main
+   - **Main file path**: streamlit_app.py
+   - **Python version**: 3.9+
+   - **Secrets**: 
+     - `OPENAI_API_KEY`: su_clave_de_api
+     - `access_password`: su_contraseña_personalizada (opcional, por defecto es SBLMIgual2025)
+
+## Configuración Local
+
+Para ejecutar localmente:
+
+1. Clone el repositorio
+2. Cree un archivo `.env` con:
+   ```
+   OPENAI_API_KEY=su_clave_de_api
+   ACCESS_PASSWORD=su_contraseña_personalizada
+   ```
+3. Ejecute `streamlit run streamlit_app.py`
