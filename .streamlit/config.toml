@@ -1,0 +1,14 @@
+[theme]
+primaryColor = "#1a4a73"  # Deep blue for primary elements
+backgroundColor = "#f8f9fa"  # Light background
+secondaryBackgroundColor = "#e9ecef"  # Subtle gray for secondary elements
+textColor = "#212529"  # Dark text for readability
+font = "serif"  # Serif font for a more elegant look
+
+[server]
+enableCORS = true
+enableXsrfProtection = true
+maxUploadSize = 200
+
+[browser]
+gatherUsageStats = false
